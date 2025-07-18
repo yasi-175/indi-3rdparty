@@ -1,0 +1,71 @@
+# Simple Makefile for QHY Mount Test Program
+# This is a standalone makefile for quick testing
+
+CXX = g++
+CXXFLAGS = -std=c++11 -Wall -Wextra -O2 -g
+INCLUDES = -I. -I./eqmod -I/usr/include/libindi -I/usr/include/libnova
+LIBS = -lindi -lnova -lgsl -lgslcblas -lz -lpthread
+
+# Source files
+MOUNT_TEST_SRCS = qhy_mount_test.cpp \
+                  qhy_mount_base.cpp \
+                  eqmod/eqmodbase.cpp \
+                  eqmod/eqmoderror.cpp \
+                  eqmod/skywatcher.cpp \
+                  eqmod/simulator/simulator.cpp \
+                  eqmod/simulator/skywatcher-simulator.cpp
+
+# Object files
+MOUNT_TEST_OBJS = $(MOUNT_TEST_SRCS:.cpp=.o)
+
+# Target executable
+TARGET = qhy_mount_test
+
+# Default target
+all: $(TARGET)
+
+# Build the test program
+$(TARGET): $(MOUNT_TEST_OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+
+# Compile source files
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean build files
+clean:
+	rm -f $(MOUNT_TEST_OBJS) $(TARGET)
+
+# Install target (optional)
+install: $(TARGET)
+	sudo cp $(TARGET) /usr/local/bin/
+
+# Uninstall target (optional)
+uninstall:
+	sudo rm -f /usr/local/bin/$(TARGET)
+
+# Run the test program
+test: $(TARGET)
+	./$(TARGET)
+
+# Run the test program in interactive mode
+test-interactive: $(TARGET)
+	./$(TARGET) --interactive
+
+# Run the test program in simulation mode
+test-sim: $(TARGET)
+	./$(TARGET) --simulate
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all            - Build the test program (default)"
+	@echo "  clean          - Remove build files"
+	@echo "  install        - Install to /usr/local/bin"
+	@echo "  uninstall      - Remove from /usr/local/bin"
+	@echo "  test           - Build and run automated tests"
+	@echo "  test-interactive - Build and run in interactive mode"
+	@echo "  test-sim       - Build and run in simulation mode"
+	@echo "  help           - Show this help message"
+
+.PHONY: all clean install uninstall test test-interactive test-sim help

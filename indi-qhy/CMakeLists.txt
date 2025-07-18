@@ -12,6 +12,7 @@ find_package(ZLIB REQUIRED)
 find_package(Nova REQUIRED)
 find_package(USB1 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(GSL REQUIRED)
 
 if(INDI_JSONLIB)
     set(JSONLIB "")
@@ -36,6 +37,7 @@ include_directories( ${CFITSIO_INCLUDE_DIR})
 include_directories( ${QHY_INCLUDE_DIR})
 include_directories( ${USB1_INCLUDE_DIRS})
 include_directories( ${NOVA_INCLUDE_DIRS})
+include_directories( ${GSL_INCLUDE_DIR})
 
 add_definitions(-DCALLBACK_MODE_SUPPORT -D__CPP_MODE__)
 
@@ -94,3 +96,58 @@ IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
 endif()
 
 install(TARGETS indi_qhy_focuser RUNTIME DESTINATION bin )
+
+########### qhy_mount ###########
+set(qhy_mount_CXX_SRCS
+   ${CMAKE_CURRENT_SOURCE_DIR}/qhy_mount.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/qhy_mount_base.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/eqmodbase.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/eqmoderror.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/skywatcher.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/simulator/simulator.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/simulator/skywatcher-simulator.cpp)
+
+if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(qhy_mount_CXX_SRCS ${qhy_mount_CXX_SRCS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/mach_gettime.cpp)
+endif()
+
+add_executable(indi_qhy_mount ${qhy_mount_CXX_SRCS})
+
+target_link_libraries(indi_qhy_mount ${INDI_LIBRARIES} ${NOVA_LIBRARIES} ${GSL_LIBRARIES} ${ZLIB_LIBRARY})
+
+IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
+    target_link_libraries(indi_qhy_mount rt)
+endif()
+
+install(TARGETS indi_qhy_mount RUNTIME DESTINATION bin )
+
+########### qhy_mount_test ###########
+add_executable(qhy_mount_test
+   ${CMAKE_CURRENT_SOURCE_DIR}/qhy_mount_test.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/qhy_mount_base.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/eqmodbase.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/eqmoderror.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/skywatcher.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/simulator/simulator.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/simulator/skywatcher-simulator.cpp)
+
+if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(qhy_mount_test_CXX_SRCS ${qhy_mount_test_CXX_SRCS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/eqmod/mach_gettime.cpp)
+endif()
+
+target_link_libraries(qhy_mount_test ${INDI_LIBRARIES} ${NOVA_LIBRARIES} ${GSL_LIBRARIES} ${ZLIB_LIBRARY})
+
+IF (${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
+    target_link_libraries(qhy_mount_test rt)
+endif()
+
+install(TARGETS qhy_mount_test RUNTIME DESTINATION bin )
+
+########### qhy_mount_simple_test ###########
+add_executable(qhy_mount_simple_test ${CMAKE_CURRENT_SOURCE_DIR}/qhy_mount_simple_test.cpp)
+
+target_link_libraries(qhy_mount_simple_test ${CMAKE_THREAD_LIBS_INIT})
+
+install(TARGETS qhy_mount_simple_test RUNTIME DESTINATION bin )
