@@ -127,6 +127,9 @@ EQMod::EQMod(): GI(this)
                            | TELESCOPE_HAS_PIER_SIDE | TELESCOPE_HAS_TRACK_RATE | TELESCOPE_HAS_TRACK_MODE | TELESCOPE_CAN_CONTROL_TRACK,
                            SLEWMODES);
 
+    // Set telescope connection types (serial and TCP)
+    setTelescopeConnection(CONNECTION_SERIAL | CONNECTION_TCP);
+
     RAInverted = DEInverted = false;
     bzero(&syncdata, sizeof(syncdata));
     bzero(&syncdata2, sizeof(syncdata2));
@@ -288,9 +291,13 @@ bool EQMod::initProperties()
     getSwitch("ALIGNMENT_SUBSYSTEM_ACTIVE")[0].setState(ISS_ON);
 #endif
 
-    tcpConnection->setDefaultHost("192.168.4.1");
-    tcpConnection->setDefaultPort(11880);
-    tcpConnection->setConnectionType(Connection::TCP::TYPE_UDP);
+    // TCP connection will be automatically initialized by base class
+    // Set default values if tcpConnection exists
+    if (tcpConnection) {
+        tcpConnection->setDefaultHost("192.168.4.1");
+        tcpConnection->setDefaultPort(11880);
+        tcpConnection->setConnectionType(Connection::TCP::TYPE_UDP);
+    }
 
     addAuxControls();
     return true;
@@ -700,7 +707,7 @@ bool EQMod::Handshake()
     try
     {
         if (!getActiveConnection()->name().compare("CONNECTION_TCP")
-                && tcpConnection->connectionType() == Connection::TCP::TYPE_UDP)
+                && tcpConnection && tcpConnection->connectionType() == Connection::TCP::TYPE_UDP)
         {
             tty_set_generic_udp_format(1);
             tty_set_auto_reset_udp_session(1);

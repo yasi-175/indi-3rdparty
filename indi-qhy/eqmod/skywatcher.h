@@ -45,6 +45,11 @@ class EQMod; // TODO
 #define SKYWATCHER_BACKLASH_SPEED_RA 64
 #define SKYWATCHER_BACKLASH_SPEED_DE 64
 
+// QHY Mount specific constants
+#define QHY_MOUNT_CODE 0xF1
+#define QHY_MAX_FREQUENCY_KHZ 40.0
+#define QHY_MIN_FREQUENCY_KHZ 0.01
+
 #define HEX(c) (((c) < 'A') ? ((c) - '0') : ((c) - 'A') + 10)
 
 class Skywatcher

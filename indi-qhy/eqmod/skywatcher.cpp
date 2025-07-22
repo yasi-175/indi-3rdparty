@@ -82,7 +82,8 @@ bool Skywatcher::Handshake()
     //read_eqmod();
     tmpMCVersion = Revu24str2long(response + 1);
     MCVersion    = ((tmpMCVersion & 0xFF) << 16) | ((tmpMCVersion & 0xFF00)) | ((tmpMCVersion & 0xFF0000) >> 16);
-    MountCode    = MCVersion & 0xFF;
+    // For QHY Mount, always use QHY_MOUNT_CODE
+    MountCode = QHY_MOUNT_CODE; // 0xF1
     /* Check supported mounts here */
     if ((MountCode == 0x80) || (MountCode == 0x81) /*|| (MountCode == 0x82)*/ || (MountCode == 0x90))
     {
@@ -574,6 +575,11 @@ void Skywatcher::InquireBoardVersion(char **boardinfo)
             minperiods[Axis1] = 13;
             minperiods[Axis2] = 16;
             break;
+        case QHY_MOUNT_CODE:
+            strcpy(boardinfo[0], "QHY Mount");
+            minperiods[Axis1] = 6;
+            minperiods[Axis2] = 6;
+            break;
         default:
             strcpy(boardinfo[0], "CUSTOM");
             break;
@@ -861,14 +867,34 @@ void Skywatcher::SlewRA(double rate)
         throw EQModError(EQModError::ErrInvalidParameter,
                          "Speed rate out of limits: %.2fx Sidereal (min=%.2f, max=%.2f)", absrate, MIN_RATE, MAX_RATE);
     }
-    //if (MountCode != 0xF0) {
-    if (absrate > SKYWATCHER_LOWSPEED_RATE)
+    // QHY Mount uses direct frequency control instead of complex calculations
+    if (MountCode == QHY_MOUNT_CODE) // QHY Mount
     {
-        absrate      = absrate / RAHighspeedRatio;
-        useHighspeed = true;
+        // For QHY Mount: period directly represents motor frequency in kHz
+        // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
+        // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
+        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
+            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
+        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
+            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+
+        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+
+        // For QHY mount, we don't use high/low speed distinction in the same way
+        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
     }
-    //}
-    period = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * RAStepsWorm) / static_cast<double>(RASteps360)) / absrate);
+    else
+    {
+        //if (MountCode != 0xF0) {
+        if (absrate > SKYWATCHER_LOWSPEED_RATE)
+        {
+            absrate      = absrate / RAHighspeedRatio;
+            useHighspeed = true;
+        }
+        //}
+        period = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * RAStepsWorm) / static_cast<double>(RASteps360)) / absrate);
+    }
     if (rate >= 0.0)
         newstatus.direction = FORWARD;
     else
@@ -903,14 +929,34 @@ void Skywatcher::SlewDE(double rate)
         throw EQModError(EQModError::ErrInvalidParameter,
                          "Speed rate out of limits: %.2fx Sidereal (min=%.2f, max=%.2f)", absrate, MIN_RATE, MAX_RATE);
     }
-    //if (MountCode != 0xF0) {
-    if (absrate > SKYWATCHER_LOWSPEED_RATE)
+    // QHY Mount uses direct frequency control instead of complex calculations
+    if (MountCode == QHY_MOUNT_CODE) // QHY Mount
     {
-        absrate      = absrate / DEHighspeedRatio;
-        useHighspeed = true;
+        // For QHY Mount: period directly represents motor frequency in kHz
+        // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
+        // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
+        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
+            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
+        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
+            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+
+        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+
+        // For QHY mount, we don't use high/low speed distinction in the same way
+        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
     }
-    //}
-    period = (long)(((SKYWATCHER_STELLAR_DAY * (double)DEStepsWorm) / (double)DESteps360) / absrate);
+    else
+    {
+        //if (MountCode != 0xF0) {
+        if (absrate > SKYWATCHER_LOWSPEED_RATE)
+        {
+            absrate      = absrate / DEHighspeedRatio;
+            useHighspeed = true;
+        }
+        //}
+        period = (long)(((SKYWATCHER_STELLAR_DAY * (double)DEStepsWorm) / (double)DESteps360) / absrate);
+    }
 
     LOGF_DEBUG("Slewing DE at %.2f %.2f %x %f\n", rate, absrate, period,
                (((SKYWATCHER_STELLAR_DAY * (double)RAStepsWorm) / (double)RASteps360) / absrate));
@@ -1093,15 +1139,35 @@ void Skywatcher::SetRARate(double rate)
         throw EQModError(EQModError::ErrInvalidParameter,
                          "Speed rate out of limits: %.2fx Sidereal (min=%.2f, max=%.2f)", absrate, MIN_RATE, MAX_RATE);
     }
-    //if (MountCode != 0xF0) {
-    if (absrate > SKYWATCHER_LOWSPEED_RATE)
+    // QHY Mount uses direct frequency control instead of complex calculations
+    if (MountCode == QHY_MOUNT_CODE) // QHY Mount
     {
-        absrate      = absrate / RAHighspeedRatio;
-        useHighspeed = true;
+        // For QHY Mount: period directly represents motor frequency in kHz
+        // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
+        // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
+        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
+            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
+        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
+            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+
+        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+
+        // For QHY mount, we don't use high/low speed distinction in the same way
+        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
     }
-    //}
-    period              = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * RAStepsWorm) / static_cast<double>
-                          (RASteps360)) / absrate);
+    else
+    {
+        //if (MountCode != 0xF0) {
+        if (absrate > SKYWATCHER_LOWSPEED_RATE)
+        {
+            absrate      = absrate / RAHighspeedRatio;
+            useHighspeed = true;
+        }
+        //}
+        period              = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * RAStepsWorm) / static_cast<double>
+                              (RASteps360)) / absrate);
+    }
     newstatus.direction = ((rate >= 0.0) ? FORWARD : BACKWARD);
     //newstatus.slewmode=RAStatus.slewmode;
     newstatus.slewmode = SLEW;
@@ -1137,15 +1203,35 @@ void Skywatcher::SetDERate(double rate)
         throw EQModError(EQModError::ErrInvalidParameter,
                          "Speed rate out of limits: %.2fx Sidereal (min=%.2f, max=%.2f)", absrate, MIN_RATE, MAX_RATE);
     }
-    //if (MountCode != 0xF0) {
-    if (absrate > SKYWATCHER_LOWSPEED_RATE)
+    // QHY Mount uses direct frequency control instead of complex calculations
+    if (MountCode == QHY_MOUNT_CODE) // QHY Mount
     {
-        absrate      = absrate / DEHighspeedRatio;
-        useHighspeed = true;
+        // For QHY Mount: period directly represents motor frequency in kHz
+        // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
+        // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
+        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
+            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
+        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
+            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+
+        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+
+        // For QHY mount, we don't use high/low speed distinction in the same way
+        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
     }
-    //}
-    period              = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * DEStepsWorm) / static_cast<double>
-                          (DESteps360)) / absrate);
+    else
+    {
+        //if (MountCode != 0xF0) {
+        if (absrate > SKYWATCHER_LOWSPEED_RATE)
+        {
+            absrate      = absrate / DEHighspeedRatio;
+            useHighspeed = true;
+        }
+        //}
+        period              = static_cast<uint32_t>(((SKYWATCHER_STELLAR_DAY * DEStepsWorm) / static_cast<double>
+                              (DESteps360)) / absrate);
+    }
     newstatus.direction = ((rate >= 0.0) ? FORWARD : BACKWARD);
     //newstatus.slewmode=DEStatus.slewmode;
     newstatus.slewmode = SLEW;
@@ -1217,12 +1303,36 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
         currentstatus = &RAStatus;
     else
         currentstatus = &DEStatus;
-    if ((currentstatus->speedmode == HIGHSPEED) && (period < minperiods[axis]))
+
+    // Special handling for QHY Mount
+    if (MountCode == QHY_MOUNT_CODE) // QHY Mount
     {
-        LOGF_WARN("Setting axis %c period to minimum. Requested is %d, minimum is %d\n", AxisCmd[axis],
-                  period, minperiods[axis]);
-        period = minperiods[axis];
+        // For QHY Mount, period represents frequency in Hz
+        // Convert to kHz and clamp to firmware limits
+        double period_khz = period / 1000.0;
+
+        if (period_khz < QHY_MIN_FREQUENCY_KHZ)
+            period_khz = QHY_MIN_FREQUENCY_KHZ;
+        if (period_khz > QHY_MAX_FREQUENCY_KHZ)
+            period_khz = QHY_MAX_FREQUENCY_KHZ;
+
+        // Send frequency directly to firmware (simplified: just use the kHz value)
+        // The firmware expects frequency in a specific format
+        period = static_cast<uint32_t>(period_khz * 100); // Convert kHz to firmware units
+
+        DEBUGF(telescope->DBG_MOUNT, "QHY Mount: Setting frequency to %.2f kHz (firmware value=%ld)", period_khz, static_cast<long>(period));
     }
+    else
+    {
+        // Standard Skywatcher mount handling
+        if ((currentstatus->speedmode == HIGHSPEED) && (period < minperiods[axis]))
+        {
+            LOGF_WARN("Setting axis %c period to minimum. Requested is %d, minimum is %d\n", AxisCmd[axis],
+                      period, minperiods[axis]);
+            period = minperiods[axis];
+        }
+    }
+
     long2Revu24str(period, cmd);
 
     if ((axis == Axis1) && (RARunning && (currentstatus->slewmode == GOTO || currentstatus->speedmode == HIGHSPEED)))
