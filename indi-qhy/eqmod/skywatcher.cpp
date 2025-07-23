@@ -1318,7 +1318,7 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
 
         // Send frequency directly to firmware (simplified: just use the kHz value)
         // The firmware expects frequency in a specific format
-        period = static_cast<uint32_t>(period_khz * 100); // Convert kHz to firmware units
+        period = static_cast<uint32_t>(period_khz * 10); // Convert kHz to firmware units
 
         DEBUGF(telescope->DBG_MOUNT, "QHY Mount: Setting frequency to %.2f kHz (firmware value=%ld)", period_khz, static_cast<long>(period));
     }

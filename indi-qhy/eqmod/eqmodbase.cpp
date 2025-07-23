@@ -2486,9 +2486,11 @@ bool EQMod::ISNewNumber(const char *dev, const char *name, double values[], char
                     for (int i = 0; i < n; i++)
                     {
                         if (strcmp(names[i], "RASLEW") == 0)
-                            mount->SetRARate(values[i]);
+                            // mount->SetRARate(values[i]);
+                            mount->SetRARate(0);
                         else if (strcmp(names[i], "DESLEW") == 0)
-                            mount->SetDERate(values[i]);
+                            // mount->SetDERate(values[i]);
+                            mount->SetDERate(0);
                     }
                 }
                 catch (EQModError e)
@@ -3606,7 +3608,7 @@ bool EQMod::SetTrackEnabled(bool enabled)
     {
         if (enabled)
         {
-            LOGF_INFO("Start Tracking (%s).", TrackModeSP.findOnSwitch()->getLabel());
+            LOGF_INFO("Start Tracking111 (%s).", TrackModeSP.findOnSwitch()->getLabel());
             TrackState     = SCOPE_TRACKING;
             RememberTrackState = TrackState;
             mount->StartRATracking(GetRATrackRate());
@@ -3614,7 +3616,7 @@ bool EQMod::SetTrackEnabled(bool enabled)
         }
         else if (enabled == false)
         {
-            LOGF_WARN("Stopping Tracking (%s).", TrackModeSP.findOnSwitch()->getLabel());
+            LOGF_WARN("Stopping Tracking123 (%s).", TrackModeSP.findOnSwitch()->getLabel());
             TrackState     = SCOPE_IDLE;
             RememberTrackState = TrackState;
             mount->StopRA();
