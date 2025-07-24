@@ -855,7 +855,7 @@ void Skywatcher::SlewRA(double rate)
     bool useHighspeed    = false;
     SkywatcherAxisStatus newstatus;
 
-    LOGF_DEBUG("%s() : rate = %g", __FUNCTION__, rate);
+    LOGF_INFO("%s() : rate = %g", __FUNCTION__, rate);
 
     if (RARunning && (RAStatus.slewmode == GOTO))
     {
@@ -873,16 +873,25 @@ void Skywatcher::SlewRA(double rate)
         // For QHY Mount: period directly represents motor frequency in kHz
         // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
         // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
-        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        double staller_speed = 59.26;
+        double frequency_khz = absrate * staller_speed / 1000;
+
+        // 限制频率范围
         if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
-            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
+           frequency_khz = QHY_MAX_FREQUENCY_KHZ;
         if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
-            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+           frequency_khz = QHY_MIN_FREQUENCY_KHZ;
 
-        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+        //LOGF_INFO(" frequency_khz = %g", frequency_khz);
 
+        // 计算 period 并调试
+        double calculated_period = frequency_khz * 100000;
+        //LOGF_INFO(" calculated_period (raw) = %g", calculated_period);
+
+        period = static_cast<uint32_t>(calculated_period);  // 直接赋值给函数级别的period变量
+        //LOGF_INFO(" period (uint32_t) = %u", period);  // 注意：用 %u 而不是 %g
         // For QHY mount, we don't use high/low speed distinction in the same way
-        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
+        useHighspeed = (frequency_khz > 0.01); // Consider > 1kHz as high speed
     }
     else
     {
@@ -904,7 +913,10 @@ void Skywatcher::SlewRA(double rate)
         newstatus.speedmode = HIGHSPEED;
     else
         newstatus.speedmode = LOWSPEED;
+
     SetMotion(Axis1, newstatus);
+    LOGF_INFO(" period11  = %u", period);
+    //LOGF_INFO(" period11 = %u", period);
     SetSpeed(Axis1, period);
     if (!RARunning)
         StartMotor(Axis1);
@@ -917,7 +929,7 @@ void Skywatcher::SlewDE(double rate)
     bool useHighspeed    = false;
     SkywatcherAxisStatus newstatus;
 
-    LOGF_DEBUG("%s() : rate = %g", __FUNCTION__, rate);
+    LOGF_INFO("%s() : rate = %g", __FUNCTION__, rate);
 
     if (DERunning && (DEStatus.slewmode == GOTO))
     {
@@ -935,16 +947,26 @@ void Skywatcher::SlewDE(double rate)
         // For QHY Mount: period directly represents motor frequency in kHz
         // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
         // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
-        double frequency_khz = absrate; // Use rate directly as frequency in kHz
-        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
-            frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
-        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
-            frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
+        double staller_speed = 59.26;
+        double frequency_khz = absrate * staller_speed / 1000;
 
-        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+        // 限制频率范围
+        if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
+           frequency_khz = QHY_MAX_FREQUENCY_KHZ;
+        if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
+           frequency_khz = QHY_MIN_FREQUENCY_KHZ;
+
+        //LOGF_INFO(" frequency_khz = %g", frequency_khz);
+
+        // 计算 period 并调试
+        double calculated_period = frequency_khz * 100000;
+        //LOGF_INFO(" calculated_period (raw) = %g", calculated_period);
+
+        period = static_cast<uint32_t>(calculated_period);  // 直接赋值给函数级别的period变量
+        //LOGF_INFO(" period (uint32_t) = %u", period);  // 注意：用 %u 而不是 %g
 
         // For QHY mount, we don't use high/low speed distinction in the same way
-        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
+        useHighspeed = (frequency_khz > 0.01); // Consider > 1kHz as high speed
     }
     else
     {
@@ -970,7 +992,10 @@ void Skywatcher::SlewDE(double rate)
         newstatus.speedmode = HIGHSPEED;
     else
         newstatus.speedmode = LOWSPEED;
+
     SetMotion(Axis2, newstatus);
+    LOGF_INFO(" period11  = %u", period);
+    //LOGF_INFO(" period11 = %u", period);
     SetSpeed(Axis2, period);
     if (!DERunning)
         StartMotor(Axis2);
@@ -1145,16 +1170,20 @@ void Skywatcher::SetRARate(double rate)
         // For QHY Mount: period directly represents motor frequency in kHz
         // period = 10 -> 10kHz, period = 1 -> 1kHz, period = 0.1 -> 100Hz, period = 0.01 -> 10Hz
         // Maximum frequency is 40kHz, minimum is 0.01kHz (10Hz)
-        double frequency_khz = absrate; // Use rate directly as frequency in kHz
+        double frequency_khz = absrate / 1000; // Use rate directly as frequency in kHz
         if (frequency_khz > QHY_MAX_FREQUENCY_KHZ)
             frequency_khz = QHY_MAX_FREQUENCY_KHZ; // Firmware limit: max 40kHz
         if (frequency_khz < QHY_MIN_FREQUENCY_KHZ)
             frequency_khz = QHY_MIN_FREQUENCY_KHZ; // Firmware limit: min 10Hz
 
-        period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
+        // 计算 period 并调试
+        double calculated_period = frequency_khz * 100000;
+        //LOGF_INFO(" calculated_period (raw) = %g", calculated_period);
 
+        period = static_cast<uint32_t>(calculated_period);  // 直接赋值给函数级别的period变量
+        //LOGF_INFO(" period (uint32_t) = %u", period);  // 注意：用 %u 而不是 %g
         // For QHY mount, we don't use high/low speed distinction in the same way
-        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
+        useHighspeed = (frequency_khz > 0.3); // Consider > 1kHz as high speed
     }
     else
     {
@@ -1218,7 +1247,7 @@ void Skywatcher::SetDERate(double rate)
         period = static_cast<uint32_t>(frequency_khz * 1000); // Convert to Hz for internal use
 
         // For QHY mount, we don't use high/low speed distinction in the same way
-        useHighspeed = (frequency_khz > 1.0); // Consider > 1kHz as high speed
+        useHighspeed = (frequency_khz > 0.3); // Consider > 1kHz as high speed
     }
     else
     {
@@ -1257,7 +1286,7 @@ void Skywatcher::StartRATracking(double trackspeed)
 {
     double rate;
     if (trackspeed != 0.0)
-        rate = trackspeed / SKYWATCHER_STELLAR_SPEED;
+        rate = trackspeed ;
     else
         rate = 0.0;
     LOGF_DEBUG("%s() : trackspeed = %g arcsecs/s, computed rate = %g", __FUNCTION__, trackspeed,
@@ -1309,7 +1338,7 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
     {
         // For QHY Mount, period represents frequency in Hz
         // Convert to kHz and clamp to firmware limits
-        double period_khz = period / 1000.0;
+        double period_khz = period / 100000.0;
 
         if (period_khz < QHY_MIN_FREQUENCY_KHZ)
             period_khz = QHY_MIN_FREQUENCY_KHZ;
@@ -1318,7 +1347,11 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
 
         // Send frequency directly to firmware (simplified: just use the kHz value)
         // The firmware expects frequency in a specific format
-        period = static_cast<uint32_t>(period_khz * 10); // Convert kHz to firmware units
+        // period = static_cast<uint32_t>(period_khz * 100000); // Convert kHz to firmware units
+        double calculated_period = period_khz * 100000;
+        //LOGF_INFO(" calculated_period (raw) = %g", calculated_period);
+
+        period = static_cast<uint32_t>(calculated_period); 
 
         DEBUGF(telescope->DBG_MOUNT, "QHY Mount: Setting frequency to %.2f kHz (firmware value=%ld)", period_khz, static_cast<long>(period));
     }
@@ -1333,6 +1366,7 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
         }
     }
 
+    LOGF_INFO(" period123 = %u", period);
     long2Revu24str(period, cmd);
 
     if ((axis == Axis1) && (RARunning && (currentstatus->slewmode == GOTO || currentstatus->speedmode == HIGHSPEED)))
