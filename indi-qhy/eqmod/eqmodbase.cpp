@@ -1920,7 +1920,9 @@ bool EQMod::Goto(double r, double d)
         gotoparams.detarget = ghdetarget;
     }
 #endif
-
+    currentRAEncoder = mount->GetRAEncoder();
+    currentDEEncoder = mount->GetDEEncoder();
+    LOGF_INFO("Goto RA=%g DE=%g (current RA=%u DE=%u)", gotoparams.ratarget, gotoparams.detarget, currentRAEncoder, currentDEEncoder);
     gotoparams.racurrentencoder = currentRAEncoder;
     gotoparams.decurrentencoder = currentDEEncoder;
     gotoparams.completed        = false;

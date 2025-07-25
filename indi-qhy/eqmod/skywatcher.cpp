@@ -130,6 +130,7 @@ uint32_t Skywatcher::GetRAEncoder()
         DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = %ld", __FUNCTION__, static_cast<long>(RAStep));
         lastRAStep = RAStep;
     }
+    //LOGF_INFO(" ra encoder  = %u", steps);
     return RAStep;
 }
 
@@ -139,6 +140,7 @@ uint32_t Skywatcher::GetDEEncoder()
     dispatch_command(GetAxisPosition, Axis2, nullptr);
 
     uint32_t steps = Revu24str2long(response + 1);
+    //LOGF_INFO(" dec encoder  = %u", steps);
     if (steps & 0x80000000)
         DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s", __FUNCTION__, response);
     else
@@ -149,6 +151,7 @@ uint32_t Skywatcher::GetDEEncoder()
         DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = %ld", __FUNCTION__, static_cast<long>(DEStep));
         lastDEStep = DEStep;
     }
+    //LOGF_INFO(" dec encoder  = %u", steps);
     return DEStep;
 }
 
@@ -577,8 +580,8 @@ void Skywatcher::InquireBoardVersion(char **boardinfo)
             break;
         case QHY_MOUNT_CODE:
             strcpy(boardinfo[0], "QHY Mount");
-            minperiods[Axis1] = 6;
-            minperiods[Axis2] = 6;
+            minperiods[Axis1] = 400000;
+            minperiods[Axis2] = 400000;
             break;
         default:
             strcpy(boardinfo[0], "CUSTOM");
@@ -1005,9 +1008,8 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
 {
     SkywatcherAxisStatus newstatus;
     bool useHighSpeed        = false;
-    uint32_t lowperiod = 18, lowspeedmargin = 20000, breaks = 400;
+    uint32_t lowperiod = 10000, lowspeedmargin = 1200, breaks = 400;
     /* highperiod = RA 450X DE (+5) 200x, low period 32x */
-
     LOGF_DEBUG("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
 
     newstatus.slewmode = GOTO;
@@ -1034,9 +1036,9 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
             SetSpeed(Axis1, lowperiod);
         SetTarget(Axis1, deltaraencoder);
         if (useHighSpeed)
-            breaks = ((deltaraencoder > 3200) ? 3200 : deltaraencoder / 10);
+            breaks = ((deltaraencoder > 320) ? 320 : deltaraencoder / 10);
         else
-            breaks = ((deltaraencoder > 200) ? 200 : deltaraencoder / 10);
+            breaks = ((deltaraencoder > 20) ? 20 : deltaraencoder / 10);
         SetTargetBreaks(Axis1, breaks);
         StartMotor(Axis1);
     }
@@ -1064,9 +1066,9 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
             SetSpeed(Axis2, lowperiod);
         SetTarget(Axis2, deltadeencoder);
         if (useHighSpeed)
-            breaks = ((deltadeencoder > 3200) ? 3200 : deltadeencoder / 10);
+            breaks = ((deltadeencoder > 1500) ? 1500 : deltadeencoder / 10);
         else
-            breaks = ((deltadeencoder > 200) ? 200 : deltadeencoder / 10);
+            breaks = ((deltadeencoder > 100) ? 100 : deltadeencoder / 10);
         SetTargetBreaks(Axis2, breaks);
         StartMotor(Axis2);
     }
@@ -1077,9 +1079,9 @@ void Skywatcher::AbsSlewTo(uint32_t raencoder, uint32_t deencoder, bool raup, bo
     SkywatcherAxisStatus newstatus;
     bool useHighSpeed = false;
     int32_t deltaraencoder, deltadeencoder;
-    uint32_t lowperiod = 18, lowspeedmargin = 20000, breaks = 400;
+    uint32_t lowperiod = 10000, lowspeedmargin = 1200, breaks = 400;
     /* highperiod = RA 450X DE (+5) 200x, low period 32x */
-
+    LOGF_INFO(" AbsSlewTo  = %u", lowperiod);
     LOGF_DEBUG("%s() : absRA = %ld raup = %c absDE = %ld deup = %c", __FUNCTION__, static_cast<long>(raencoder),
                (raup ? '1' : '0'), static_cast<long>(deencoder), (deup ? '1' : '0'));
 
@@ -1110,9 +1112,9 @@ void Skywatcher::AbsSlewTo(uint32_t raencoder, uint32_t deencoder, bool raup, bo
             SetSpeed(Axis1, lowperiod);
         SetAbsTarget(Axis1, raencoder);
         if (useHighSpeed)
-            breaks = ((deltaraencoder > 3200) ? 3200 : deltaraencoder / 10);
+            breaks = ((deltaraencoder > 1500) ? 1500 : deltaraencoder / 10);
         else
-            breaks = ((deltaraencoder > 200) ? 200 : deltaraencoder / 10);
+            breaks = ((deltaraencoder > 100) ? 100 : deltaraencoder / 10);
         breaks = (raup ? (raencoder - breaks) : (raencoder + breaks));
         SetAbsTargetBreaks(Axis1, breaks);
         StartMotor(Axis1);
@@ -1141,9 +1143,9 @@ void Skywatcher::AbsSlewTo(uint32_t raencoder, uint32_t deencoder, bool raup, bo
             SetSpeed(Axis2, lowperiod);
         SetAbsTarget(Axis2, deencoder);
         if (useHighSpeed)
-            breaks = ((deltadeencoder > 3200) ? 3200 : deltadeencoder / 10);
+            breaks = ((deltadeencoder > 320) ? 320 : deltadeencoder / 10);
         else
-            breaks = ((deltadeencoder > 200) ? 200 : deltadeencoder / 10);
+            breaks = ((deltadeencoder > 20) ? 20 : deltadeencoder / 10);
         breaks = (deup ? (deencoder - breaks) : (deencoder + breaks));
         SetAbsTargetBreaks(Axis2, breaks);
         StartMotor(Axis2);
