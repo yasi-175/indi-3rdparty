@@ -363,4 +363,9 @@ class Skywatcher
 
         const long EQMOD_TIMEOUT = 200000; // us
         const uint8_t EQMOD_MAX_RETRY = 10;
+
+        // 15位绝对编码器相关常量
+        static constexpr uint32_t ENCODER_15BIT_MAX = 0x7FFF;      // 15位编码器最大值 (32767)
+        static constexpr uint32_t ENCODER_15BIT_CENTER = 0x4000;   // 15位编码器中心位置 (16384)
+        static constexpr uint32_t ENCODER_15BIT_STEPS_360 = 32768; // 15位编码器360度总步数 (2^15)
 };

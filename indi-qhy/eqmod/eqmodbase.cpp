@@ -1484,14 +1484,32 @@ void EQMod::EncodersToRADec(uint32_t rastep, uint32_t destep, double lst, double
 double EQMod::EncoderToHours(uint32_t step, uint32_t initstep, uint32_t totalstep, enum Hemisphere h)
 {
     double result = 0.0;
-    if (step > initstep)
+
+    // 对于15位绝对编码器，需要考虑环绕情况
+    // 计算最短路径的差值
+    int32_t diff = static_cast<int32_t>(step) - static_cast<int32_t>(initstep);
+
+    // 处理环绕：如果差值超过半圈，选择较短的路径
+    if (diff > static_cast<int32_t>(totalstep / 2))
     {
-        result = (static_cast<double>(step - initstep) / totalstep) * 24.0;
+        diff -= totalstep;
+    }
+    else if (diff < -static_cast<int32_t>(totalstep / 2))
+    {
+        diff += totalstep;
+    }
+
+    // 计算小时角
+    result = (static_cast<double>(diff) / totalstep) * 24.0;
+
+    // 原来的逻辑：如果是正向移动，需要反转
+    if (diff > 0)
+    {
         result = 24.0 - result;
     }
     else
     {
-        result = (static_cast<double>(initstep - step) / totalstep) * 24.0;
+        result = -result;
     }
 
     if (h == NORTH)
@@ -1504,15 +1522,30 @@ double EQMod::EncoderToHours(uint32_t step, uint32_t initstep, uint32_t totalste
 double EQMod::EncoderToDegrees(uint32_t step, uint32_t initstep, uint32_t totalstep, enum Hemisphere h)
 {
     double result = 0.0;
-    if (step > initstep)
+
+    // 对于15位绝对编码器，需要考虑环绕情况
+    // 计算最短路径的差值
+    int32_t diff = static_cast<int32_t>(step) - static_cast<int32_t>(initstep);
+
+    // 处理环绕：如果差值超过半圈，选择较短的路径
+    if (diff > static_cast<int32_t>(totalstep / 2))
     {
-        result = (static_cast<double>(step - initstep) / totalstep) * 360.0;
+        diff -= totalstep;
     }
-    else
+    else if (diff < -static_cast<int32_t>(totalstep / 2))
     {
-        result = (static_cast<double>(initstep - step) / totalstep) * 360.0;
-        result = 360.0 - result;
+        diff += totalstep;
     }
+
+    // 计算角度
+    result = (static_cast<double>(diff) / totalstep) * 360.0;
+
+    // 确保结果为正值
+    if (result < 0)
+    {
+        result = 360.0 + result;
+    }
+
     //IDLog("EncodersToDegrees: step=%6X initstep=%6x result=%f hemisphere %s \n", step, initstep, result, (h==NORTH?"North":"South"));
     if (h == NORTH)
         result = range360(result);
@@ -1920,8 +1953,8 @@ bool EQMod::Goto(double r, double d)
         gotoparams.detarget = ghdetarget;
     }
 #endif
-    currentRAEncoder = mount->GetRAEncoder();
-    currentDEEncoder = mount->GetDEEncoder();
+    // currentRAEncoder = mount->GetRAEncoder();
+    // currentDEEncoder = mount->GetDEEncoder();
     LOGF_INFO("Goto RA=%g DE=%g (current RA=%u DE=%u)", gotoparams.ratarget, gotoparams.detarget, currentRAEncoder, currentDEEncoder);
     gotoparams.racurrentencoder = currentRAEncoder;
     gotoparams.decurrentencoder = currentDEEncoder;

@@ -119,8 +119,10 @@ uint32_t Skywatcher::GetRAEncoder()
     dispatch_command(GetAxisPosition, Axis1, nullptr);
 
     uint32_t steps = Revu24str2long(response + 1);
-    if (steps & 0x80000000)
-        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s", __FUNCTION__, response);
+    // 对于15位绝对编码器，有效范围是0-32767 (0x7FFF)
+    // 检查是否超出15位编码器的有效范围
+    if (steps > ENCODER_15BIT_MAX)
+        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s (out of 15-bit range)", __FUNCTION__, response);
     else
         RAStep = steps;
 
@@ -141,8 +143,10 @@ uint32_t Skywatcher::GetDEEncoder()
 
     uint32_t steps = Revu24str2long(response + 1);
     //LOGF_INFO(" dec encoder  = %u", steps);
-    if (steps & 0x80000000)
-        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s", __FUNCTION__, response);
+    // 对于15位绝对编码器，有效范围是0-32767 (0x7FFF)
+    // 检查是否超出15位编码器的有效范围
+    if (steps > ENCODER_15BIT_MAX)
+        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s (out of 15-bit range)", __FUNCTION__, response);
     else
         DEStep = steps;
     gettimeofday(&lastreadmotorposition[Axis2], nullptr);
@@ -344,12 +348,14 @@ void Skywatcher::Init()
         // Mount already initialized by another driver / driver instance
         // use default configuration && leave unchanged encoder values
         wasinitialized = true;
-        RAStepInit     = 0x800000;
-        DEStepInit     = 0x800000;
+        // 对于15位绝对编码器，使用中心位置作为默认值
+        // 15位编码器范围：0-32767 (0x7FFF)，中心位置：16384 (0x4000)
+        RAStepInit     = ENCODER_15BIT_CENTER;  // 15位编码器中心位置
+        DEStepInit     = ENCODER_15BIT_CENTER;  // 15位编码器中心位置
         RAStepHome     = RAStepInit;
         DEStepHome     = DEStepInit + (DESteps360 / 4);
         LOGF_WARN("%s() : Motors already initialized", __FUNCTION__);
-        LOGF_WARN("%s() : Setting default Init steps --  RAInit=%ld DEInit = %ld", __FUNCTION__,
+        LOGF_WARN("%s() : Setting default Init steps for 15-bit absolute encoder --  RAInit=%ld DEInit = %ld", __FUNCTION__,
                   static_cast<long>(RAStepInit), static_cast<long>(DEStepInit));
     }
     LOGF_DEBUG("%s() : Setting Home steps RAHome=%ld DEHome = %ld", __FUNCTION__,
@@ -744,7 +750,14 @@ void Skywatcher::InquireEncoderInfo(SkywatcherAxis axis, double *steppersvalues)
     // Steps per 360 degrees
     dispatch_command(InquireGridPerRevolution, axis, nullptr);
     //read_eqmod();
-    *Steps360        = Revu24str2long(response + 1);
+    uint32_t hardwareSteps360 = Revu24str2long(response + 1);
+
+    // 对于15位绝对编码器，强制设置为32768步/360度
+    // 这确保了坐标计算的正确性
+    *Steps360 = ENCODER_15BIT_STEPS_360;  // 2^15 = 32768 (15位绝对编码器的总步数)
+
+    LOGF_WARN("%s: Using 15-bit absolute encoder - overriding hardware reported Steps360 (%u) with %u",
+              __FUNCTION__, hardwareSteps360, *Steps360);
 
     // Steps per Worm
     dispatch_command(InquireTimerInterruptFreq, axis, nullptr);
@@ -1012,64 +1025,99 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
     /* highperiod = RA 450X DE (+5) 200x, low period 32x */
     LOGF_DEBUG("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
 
-    newstatus.slewmode = GOTO;
-    if (deltaraencoder >= 0)
+    // 修改为支持15位绝对编码器：计算绝对目标位置而不是使用增量
+    uint32_t raTarget = RAStep;
+    uint32_t deTarget = DEStep;
+    bool raForward = true;
+    bool deForward = true;
+
+    if (deltaraencoder >= 0) {
+        raTarget += deltaraencoder;
+        raForward = true;
         newstatus.direction = FORWARD;
-    else
+    } else {
+        raTarget -= (-deltaraencoder);
+        raForward = false;
         newstatus.direction = BACKWARD;
-    if (deltaraencoder < 0)
-        deltaraencoder = -deltaraencoder;
-    if (deltaraencoder > static_cast<int32_t>(lowspeedmargin))
+    }
+
+    int32_t absDeltaRA = (deltaraencoder < 0) ? -deltaraencoder : deltaraencoder;
+
+    if (absDeltaRA > static_cast<int32_t>(lowspeedmargin))
         useHighSpeed = true;
     else
         useHighSpeed = false;
+
     if (useHighSpeed)
         newstatus.speedmode = HIGHSPEED;
     else
         newstatus.speedmode = LOWSPEED;
-    if (deltaraencoder > 0)
+
+    newstatus.slewmode = GOTO;
+
+    if (absDeltaRA > 0)
     {
         SetMotion(Axis1, newstatus);
         if (useHighSpeed)
             SetSpeed(Axis1, minperiods[Axis1]);
         else
             SetSpeed(Axis1, lowperiod);
-        SetTarget(Axis1, deltaraencoder);
+
+        // 使用绝对目标位置而不是增量
+        SetAbsTarget(Axis1, raTarget);
+
         if (useHighSpeed)
-            breaks = ((deltaraencoder > 320) ? 320 : deltaraencoder / 10);
+            breaks = ((absDeltaRA > 320) ? 320 : absDeltaRA / 10);
         else
-            breaks = ((deltaraencoder > 20) ? 20 : deltaraencoder / 10);
-        SetTargetBreaks(Axis1, breaks);
+            breaks = ((absDeltaRA > 20) ? 20 : absDeltaRA / 10);
+
+        // 计算绝对断点位置
+        breaks = (raForward ? (raTarget - breaks) : (raTarget + breaks));
+        SetAbsTargetBreaks(Axis1, breaks);
         StartMotor(Axis1);
     }
 
-    if (deltadeencoder >= 0)
+    if (deltadeencoder >= 0) {
+        deTarget += deltadeencoder;
+        deForward = true;
         newstatus.direction = FORWARD;
-    else
+    } else {
+        deTarget -= (-deltadeencoder);
+        deForward = false;
         newstatus.direction = BACKWARD;
-    if (deltadeencoder < 0)
-        deltadeencoder = -deltadeencoder;
-    if (deltadeencoder > static_cast<int32_t>(lowspeedmargin))
+    }
+
+    int32_t absDeltaDE = (deltadeencoder < 0) ? -deltadeencoder : deltadeencoder;
+
+    if (absDeltaDE > static_cast<int32_t>(lowspeedmargin))
         useHighSpeed = true;
     else
         useHighSpeed = false;
+
     if (useHighSpeed)
         newstatus.speedmode = HIGHSPEED;
     else
         newstatus.speedmode = LOWSPEED;
-    if (deltadeencoder > 0)
+
+    if (absDeltaDE > 0)
     {
         SetMotion(Axis2, newstatus);
         if (useHighSpeed)
             SetSpeed(Axis2, minperiods[Axis2]);
         else
             SetSpeed(Axis2, lowperiod);
-        SetTarget(Axis2, deltadeencoder);
+
+        // 使用绝对目标位置而不是增量
+        SetAbsTarget(Axis2, deTarget);
+
         if (useHighSpeed)
-            breaks = ((deltadeencoder > 1500) ? 1500 : deltadeencoder / 10);
+            breaks = ((absDeltaDE > 1500) ? 1500 : absDeltaDE / 10);
         else
-            breaks = ((deltadeencoder > 100) ? 100 : deltadeencoder / 10);
-        SetTargetBreaks(Axis2, breaks);
+            breaks = ((absDeltaDE > 100) ? 100 : absDeltaDE / 10);
+
+        // 计算绝对断点位置
+        breaks = (deForward ? (deTarget - breaks) : (deTarget + breaks));
+        SetAbsTargetBreaks(Axis2, breaks);
         StartMotor(Axis2);
     }
 }
@@ -1414,6 +1462,7 @@ void Skywatcher::SetAbsTarget(SkywatcherAxis axis, uint32_t target)
 {
     char cmd[7];
     DEBUGF(telescope->DBG_MOUNT, "%s() : Axis = %c -- target=%ld", __FUNCTION__, AxisCmd[axis], static_cast<long>(target));
+    LOGF_INFO(" Abs-target is  = %u", target);
     long2Revu24str(target, cmd);
     //IDLog("Setting target for axis %c  to %d\n", AxisCmd[axis], increment);
     dispatch_command(SetGotoTarget, axis, cmd);
