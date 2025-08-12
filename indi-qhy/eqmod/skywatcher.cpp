@@ -1023,7 +1023,8 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
     bool useHighSpeed        = false;
     uint32_t lowperiod = 10000, lowspeedmargin = 1200, breaks = 400;
     /* highperiod = RA 450X DE (+5) 200x, low period 32x */
-    LOGF_DEBUG("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
+    LOGF_INFO("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
+    LOGF_INFO("%s() : Current RAStep = %u DEStep = %u", __FUNCTION__, RAStep, DEStep);
 
     // 修改为支持15位绝对编码器：计算绝对目标位置而不是使用增量
     uint32_t raTarget = RAStep;
@@ -1031,15 +1032,39 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
     bool raForward = true;
     bool deForward = true;
 
+    LOGF_INFO("%s() : Before RA calculation - raTarget=%u, deltaraencoder=%d", __FUNCTION__, raTarget, deltaraencoder);
+
     if (deltaraencoder >= 0) {
+        uint32_t oldTarget = raTarget;
         raTarget += deltaraencoder;
+        LOGF_INFO("%s() : RA positive delta - oldTarget=%u + delta=%d = newTarget=%u", __FUNCTION__, oldTarget, deltaraencoder, raTarget);
+
+        // 处理15位绝对编码器的环绕 (0-32767)
+        if(raTarget > 32767) {
+            uint32_t beforeWrap = raTarget;
+            raTarget = raTarget - 32768;
+            LOGF_INFO("%s() : RA wrap-around - %u -> %u", __FUNCTION__, beforeWrap, raTarget);
+        }
         raForward = true;
         newstatus.direction = FORWARD;
     } else {
-        raTarget -= (-deltaraencoder);
+        // 处理负数增量
+        uint32_t absDecrement = static_cast<uint32_t>(-deltaraencoder);
+        uint32_t oldTarget = raTarget;
+        LOGF_INFO("%s() : RA negative delta - oldTarget=%u - absDelta=%u", __FUNCTION__, oldTarget, absDecrement);
+
+        if (raTarget >= absDecrement) {
+            raTarget -= absDecrement;
+        } else {
+            // 处理下溢：从32767开始倒数
+            raTarget = 32768 - (absDecrement - raTarget);
+            LOGF_INFO("%s() : RA underflow wrap - result=%u", __FUNCTION__, raTarget);
+        }
         raForward = false;
         newstatus.direction = BACKWARD;
     }
+
+    LOGF_INFO("%s() : Final RA target = %u", __FUNCTION__, raTarget);
 
     int32_t absDeltaRA = (deltaraencoder < 0) ? -deltaraencoder : deltaraencoder;
 
@@ -1064,6 +1089,7 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
             SetSpeed(Axis1, lowperiod);
 
         // 使用绝对目标位置而不是增量
+        LOGF_INFO("%s() : Setting RA target to %u (15-bit range: 0-32767)", __FUNCTION__, raTarget);
         SetAbsTarget(Axis1, raTarget);
 
         if (useHighSpeed)
@@ -1079,10 +1105,21 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
 
     if (deltadeencoder >= 0) {
         deTarget += deltadeencoder;
+        // 处理15位绝对编码器的环绕 (0-32767)
+        if(deTarget > 32767) {
+            deTarget = deTarget - 32768;
+        }
         deForward = true;
         newstatus.direction = FORWARD;
     } else {
-        deTarget -= (-deltadeencoder);
+        // 处理负数增量
+        uint32_t absDecrement = static_cast<uint32_t>(-deltadeencoder);
+        if (deTarget >= absDecrement) {
+            deTarget -= absDecrement;
+        } else {
+            // 处理下溢：从32767开始倒数
+            deTarget = 32768 - (absDecrement - deTarget);
+        }
         deForward = false;
         newstatus.direction = BACKWARD;
     }
@@ -1108,6 +1145,7 @@ void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
             SetSpeed(Axis2, lowperiod);
 
         // 使用绝对目标位置而不是增量
+        LOGF_INFO("%s() : Setting DE target to %u (15-bit range: 0-32767)", __FUNCTION__, deTarget);
         SetAbsTarget(Axis2, deTarget);
 
         if (useHighSpeed)
@@ -1461,8 +1499,16 @@ void Skywatcher::SetTargetBreaks(SkywatcherAxis axis, uint32_t increment)
 void Skywatcher::SetAbsTarget(SkywatcherAxis axis, uint32_t target)
 {
     char cmd[7];
+
+    // 强制确保目标值在15位绝对编码器范围内 (0-32767)
+    if (target > 32767) {
+        uint32_t originalTarget = target;
+        target = target % 32768;  // 使用模运算确保在范围内
+        LOGF_WARN("SetAbsTarget: Target %u exceeds 15-bit range, wrapping to %u", originalTarget, target);
+    }
+
     DEBUGF(telescope->DBG_MOUNT, "%s() : Axis = %c -- target=%ld", __FUNCTION__, AxisCmd[axis], static_cast<long>(target));
-    LOGF_INFO(" Abs-target is  = %u", target);
+    LOGF_INFO(" Abs-target is  = %u (15-bit safe)", target);
     long2Revu24str(target, cmd);
     //IDLog("Setting target for axis %c  to %d\n", AxisCmd[axis], increment);
     dispatch_command(SetGotoTarget, axis, cmd);

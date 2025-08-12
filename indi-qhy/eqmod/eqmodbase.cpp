@@ -62,8 +62,8 @@ using namespace INDI::AlignmentSubsystem;
 #define FINE_SLEW_LIMIT 0.5 /* Move at FINE_SLEW_RATE until distance from target is FINE_SLEW_LIMIT degrees */
 
 #define GOTO_ITERATIVE_LIMIT 5 /* Max GOTO Iterations */
-#define RAGOTORESOLUTION     5 /* GOTO Resolution in arcsecs */
-#define DEGOTORESOLUTION     5 /* GOTO Resolution in arcsecs */
+#define RAGOTORESOLUTION     50 /* GOTO Resolution in arcsecs */
+#define DEGOTORESOLUTION     50 /* GOTO Resolution in arcsecs */
 
 /* Preset Slew Speeds */
 #define SLEWMODES 11
@@ -980,9 +980,17 @@ bool EQMod::ReadScopeStatus()
             AuxEncoderNP.update(auxencodervalues, (char **)auxencodernames, 2);
             AuxEncoderNP.apply();
         }
-
+        // LOGF_INFO(
+        //             "Iterative Goto (%d): RA diff = %4.2f arcsecs DE diff = %4.2f arcsecs",
+        //             gotoparams.iterative_count, 3600 * fabs(gotoparams.ratarget - currentRA),
+        //             3600 * fabs(gotoparams.detarget - currentDEC));
         if (gotoInProgress())
         {
+            LOGF_INFO(
+                    "Iterative Goto (%d): RA diff = %4.2f arcsecs DE diff = %4.2f arcsecs",
+                    gotoparams.iterative_count, 3600 * fabs(gotoparams.ratarget - currentRA),
+                    3600 * fabs(gotoparams.detarget - currentDEC));
+                    
             if (!(mount->IsRARunning()) && !(mount->IsDERunning()))
             {
                 // Goto iteration
