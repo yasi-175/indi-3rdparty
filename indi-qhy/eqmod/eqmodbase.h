@@ -55,8 +55,8 @@ protected:
     //  private:
     Skywatcher *mount;
 
-    uint32_t currentRAEncoder, zeroRAEncoder, totalRAEncoder;
-    uint32_t currentDEEncoder, zeroDEEncoder, totalDEEncoder;
+    uint32_t zeroRAEncoder, totalRAEncoder;
+    uint32_t zeroDEEncoder, totalDEEncoder;
 
     uint32_t homeRAEncoder, parkRAEncoder;
     uint32_t homeDEEncoder, parkDEEncoder;
@@ -92,7 +92,7 @@ protected:
     INDI::PropertyNumber   GuideRateNP         {INDI::Property()};
     INDI::PropertyText     MountInformationTP  {INDI::Property()};
     INDI::PropertyNumber   SteppersNP          {INDI::Property()};
-    INDI::PropertyNumber   CurrentSteppersNP   {INDI::Property()};
+
     INDI::PropertyNumber   PeriodsNP           {INDI::Property()};
     INDI::PropertyNumber   JulianNP            {INDI::Property()};
     INDI::PropertyNumber   TimeLSTNP           {INDI::Property()};
@@ -143,7 +143,6 @@ protected:
     typedef struct GotoParams
     {
         double ratarget, detarget, racurrent, decurrent;
-        uint32_t ratargetencoder, detargetencoder, racurrentencoder, decurrentencoder;
         uint32_t limiteast, limitwest;
         unsigned int iterative_count;
         bool checklimits, outsidelimits, completed;
@@ -158,19 +157,20 @@ protected:
 
     double tpa_alt, tpa_az;
 
-    void EncodersToRADec(uint32_t rastep, uint32_t destep, double lst, double *ra, double *de, double *ha,
-                         TelescopePierSide *pierSide);
+    // If true, mount firmware already holds the latest Sync offset/model.
+    // Then the driver must NOT apply its own sync delta locally to avoid double-application.
+    bool FirmwareSyncActive = false;
+
+
     double EncoderToHours(uint32_t destep, uint32_t initdestep, uint32_t totalrastep, enum Hemisphere h);
     double EncoderToDegrees(uint32_t destep, uint32_t initdestep, uint32_t totalrastep,
                             enum Hemisphere h);
     double EncoderFromHour(double hour, uint32_t initstep, uint32_t totalstep, enum Hemisphere h);
-    double EncoderFromRA(double ratarget, TelescopePierSide p, double lst, uint32_t initstep, uint32_t totalstep,
-                         enum Hemisphere h);
+
     double EncoderFromDegree(double degree, uint32_t initstep, uint32_t totalstep,
                              enum Hemisphere h);
-    double EncoderFromDec(double detarget, TelescopePierSide p, uint32_t initstep, uint32_t totalstep,
-                          enum Hemisphere h);
-    void EncoderTarget(GotoParams *g);
+
+
     void SetSouthernHemisphere(bool southern);
     void UpdateDEInverted();
     double GetRATrackRate();

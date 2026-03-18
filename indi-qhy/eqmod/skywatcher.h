@@ -30,7 +30,7 @@ class EQMod; // TODO
 
 #include "simulator/simulator.h"
 
-#define SKYWATCHER_MAX_CMD      16
+#define SKYWATCHER_MAX_CMD      32
 #define SKYWATCHER_MAX_TRIES    3
 #define SKYWATCHER_ERROR_BUFFER 1024
 
@@ -40,7 +40,8 @@ class EQMod; // TODO
 #define SKYWATCHER_STELLAR_SPEED  15.041067179
 
 #define SKYWATCHER_LOWSPEED_RATE 128
-#define SKYWATCHER_MAXREFRESH    0.5
+// Increase max refresh interval to reduce status query frequency (prevents UI stall during slews)
+#define SKYWATCHER_MAXREFRESH    1.0
 
 #define SKYWATCHER_BACKLASH_SPEED_RA 64
 #define SKYWATCHER_BACKLASH_SPEED_DE 64
@@ -70,8 +71,8 @@ class Skywatcher
         bool HasSnapPort2();
         bool HasPolarLed();
 
-        uint32_t GetRAEncoder();
-        uint32_t GetDEEncoder();
+        double GetRAEncoder();
+        double GetDEEncoder();
         uint32_t GetRAEncoderZero();
         uint32_t GetRAEncoderTotal();
         uint32_t GetRAEncoderHome();
@@ -84,7 +85,7 @@ class Skywatcher
         INDI_DEPRECATED("Use GetRAMotorStatus(INDI::PropertyLight).")
         void GetRAMotorStatus(ILightVectorProperty *motorLP);
         void GetRAMotorStatus(INDI::PropertyLight motorLP);
-        
+
         INDI_DEPRECATED("Use GetDEMotorStatus(INDI::PropertyLight).")
         void GetDEMotorStatus(ILightVectorProperty *motorLP);
         void GetDEMotorStatus(INDI::PropertyLight motorLP);
@@ -113,6 +114,9 @@ class Skywatcher
         void SetRARate(double rate);
         void SetDERate(double rate);
         void SlewTo(int32_t deltaraencoder, int32_t deltadeencoder);
+        void SlewTotarget(float target_ra, float target_de,float current_ra, float current_de);
+        float EstimateSlewTime(float angular_distance);
+        float CalculateSiderealCompensation(float slew_time_seconds);
         void AbsSlewTo(uint32_t raencoder, uint32_t deencoder, bool raup, bool deup);
         void StartRATracking(double trackspeed);
         void StartDETracking(double trackspeed);
@@ -152,6 +156,17 @@ class Skywatcher
         void TurnSnapPort2(bool on);
         bool GetSnapPort1Status();
         bool GetSnapPort2Status();
+
+        // QHY Mount time synchronization
+        void SyncTimeAndTimezone();
+        void SyncTimeAndTimezone(const struct tm* utc_time, double utc_offset_hours);
+
+        // QHY Mount location synchronization
+        void SyncLocationCoordinates();
+        void SyncLocationCoordinates(double latitude, double longitude, double elevation);
+
+        // QHY: send sync delta (RA hours, DEC degrees) to firmware in one combined command
+        void SendSyncDelta(double delta_ra, double delta_de);
 
         void setPortFD(int value);
 
@@ -195,6 +210,10 @@ class Skywatcher
             GetFeatureCmd             = 'q', // EQ8/AZEQ6/AZEQ5 only
             InquireAuxEncoder         = 'd', // EQ8/AZEQ6/AZEQ5 only
             SetPolarScopeLED          = 'V',
+            SetTimeAndTimezone        = 'T', // QHY Mount time synchronization
+            SetLocationCoordinates    = 'Z', // QHY Mount location synchronization
+            SetTargetAndCurrentPos    = 'X', // QHY Mount target and current position
+            SetSyncDelta              = 'Y'  // QHY Mount sync delta (deltaRA, deltaDEC)
         };
 
         enum SkywatcherAxis
@@ -213,7 +232,8 @@ class Skywatcher
         enum SkywatcherSlewMode
         {
             SLEW = 0,
-            GOTO = 1
+            GOTO = 1,
+            TRACK = 2
         };
         enum SkywatcherSpeedMode
         {
@@ -294,8 +314,13 @@ class Skywatcher
         void SetAxisPosition(SkywatcherAxis axis, uint32_t step);
         void TurnSnapPort(SkywatcherAxis axis, bool on);
 
+        // QHY Mount time synchronization helper
+        void SyncTimeAndTimezoneFromSystem();
+
         bool read_eqmod();
         bool dispatch_command(SkywatcherCommand cmd, SkywatcherAxis axis, char *arg);
+
+        
 
         uint32_t Revu24str2long(char *);
         uint32_t Highstr2long(char *);
@@ -320,8 +345,8 @@ class Skywatcher
         // or of using microstepping only for low speeds and half/full stepping for high speeds
         uint32_t DEHighspeedRatio;
 
-        uint32_t RAStep;     // Current RA encoder position in step
-        uint32_t DEStep;     // Current DE encoder position in step
+        double RAStep;     // Current RA encoder position in step
+        double DEStep;     // Current DE encoder position in step
         uint32_t RAStepInit; // Initial RA position in step
         uint32_t DEStepInit; // Initial DE position in step
         uint32_t RAStepHome; // Home RA position in step
@@ -329,8 +354,8 @@ class Skywatcher
         uint32_t RAPeriod {256};   // Current RA worm period
         uint32_t DEPeriod {256};   // Current DE worm period
 
-        uint32_t lastRAStep {0xFFFFFFFF};
-        uint32_t lastDEStep {0xFFFFFFFF};
+        double lastRAStep {0.0};
+        double lastDEStep {0.0};
         uint32_t lastRAPeriod {0xFFFFFFFF};
         uint32_t lastDEPeriod {0xFFFFFFFF};
 
@@ -352,6 +377,10 @@ class Skywatcher
         uint32_t Backlash[NUMBER_OF_SKYWATCHERAXIS];
         bool UseBacklash[NUMBER_OF_SKYWATCHERAXIS];
         uint32_t Target[NUMBER_OF_SKYWATCHERAXIS];
+        static constexpr uint32_t EQMOD_TIMEOUT = 200000; // us
+        static constexpr uint8_t EQMOD_MAX_RETRY = 10;
+        // Dynamic read timeout (us) that dispatch_command/read_eqmod should use
+        uint32_t read_timeout_us = EQMOD_TIMEOUT;
         uint32_t TargetBreaks[NUMBER_OF_SKYWATCHERAXIS];
         SkywatcherAxisStatus LastRunningStatus[NUMBER_OF_SKYWATCHERAXIS];
         SkywatcherAxisStatus NewStatus[NUMBER_OF_SKYWATCHERAXIS];
@@ -360,12 +389,4 @@ class Skywatcher
         uint32_t lastreadIndexer[NUMBER_OF_SKYWATCHERAXIS];
 
         bool snapportstatus[NUMBER_OF_SKYWATCHERAXIS];
-
-        const long EQMOD_TIMEOUT = 200000; // us
-        const uint8_t EQMOD_MAX_RETRY = 10;
-
-        // 15位绝对编码器相关常量
-        static constexpr uint32_t ENCODER_15BIT_MAX = 0x7FFF;      // 15位编码器最大值 (32767)
-        static constexpr uint32_t ENCODER_15BIT_CENTER = 0x4000;   // 15位编码器中心位置 (16384)
-        static constexpr uint32_t ENCODER_15BIT_STEPS_360 = 32768; // 15位编码器360度总步数 (2^15)
 };

@@ -113,18 +113,38 @@ bool Skywatcher::Disconnect()
     return true;
 }
 
-uint32_t Skywatcher::GetRAEncoder()
+void Skywatcher::SendSyncDelta(double delta_ra, double delta_de)
 {
-    // Axis Position
-    dispatch_command(GetAxisPosition, Axis1, nullptr);
+    
+    // Send delta RA on Axis1 and delta DEC on Axis2 so firmware can adjust its model
+    char arg_ra_de[32];
+    snprintf(arg_ra_de, sizeof(arg_ra_de), "%.6f,%.6f", delta_ra,delta_de);
 
-    uint32_t steps = Revu24str2long(response + 1);
-    // 对于15位绝对编码器，有效范围是0-32767 (0x7FFF)
-    // 检查是否超出15位编码器的有效范围
-    if (steps > ENCODER_15BIT_MAX)
-        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s (out of 15-bit range)", __FUNCTION__, response);
-    else
-        RAStep = steps;
+    LOGF_INFO("Sending sync delta to mount: dRA=%s (Axis1) ", arg_ra_de);
+
+    if (!dispatch_command(SetSyncDelta, Axis1, arg_ra_de))
+        LOGF_WARN("%s() : Failed to send RA sync delta to mount", __FUNCTION__);
+        //throw EQModError(EQModError::ErrCommunication, "Failed to send RA sync delta to mount");
+
+    
+}
+
+double Skywatcher::GetRAEncoder()
+{
+    try
+    {
+        // Axis Position
+        dispatch_command(GetAxisPosition, Axis1, nullptr);
+        // Accept 0.0 as a valid coordinate value.
+        if (response[0] == '=' && response[1] != '\0')
+            RAStep = atof(response + 1);
+    }
+    catch (EQModError &e)
+    {
+        // Keep last good value to avoid UI freezes on transient read errors.
+        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() read failed, keeping cached RA=%g (%s)",
+               __FUNCTION__, RAStep, e.message);
+    }
 
     gettimeofday(&lastreadmotorposition[Axis1], nullptr);
     if (RAStep != lastRAStep)
@@ -132,30 +152,32 @@ uint32_t Skywatcher::GetRAEncoder()
         DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = %ld", __FUNCTION__, static_cast<long>(RAStep));
         lastRAStep = RAStep;
     }
-    //LOGF_INFO(" ra encoder  = %u", steps);
     return RAStep;
 }
 
-uint32_t Skywatcher::GetDEEncoder()
+double Skywatcher::GetDEEncoder()
 {
-    // Axis Position
-    dispatch_command(GetAxisPosition, Axis2, nullptr);
+    try
+    {
+        // Axis Position
+        dispatch_command(GetAxisPosition, Axis2, nullptr);
+        // Accept 0.0 as a valid coordinate value.
+        if (response[0] == '=' && response[1] != '\0')
+            DEStep = atof(response + 1);
+    }
+    catch (EQModError &e)
+    {
+        // Keep last good value to avoid UI freezes on transient read errors.
+        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() read failed, keeping cached DE=%g (%s)",
+               __FUNCTION__, DEStep, e.message);
+    }
 
-    uint32_t steps = Revu24str2long(response + 1);
-    //LOGF_INFO(" dec encoder  = %u", steps);
-    // 对于15位绝对编码器，有效范围是0-32767 (0x7FFF)
-    // 检查是否超出15位编码器的有效范围
-    if (steps > ENCODER_15BIT_MAX)
-        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = Ignoring invalid response %s (out of 15-bit range)", __FUNCTION__, response);
-    else
-        DEStep = steps;
     gettimeofday(&lastreadmotorposition[Axis2], nullptr);
     if (DEStep != lastDEStep)
     {
         DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() = %ld", __FUNCTION__, static_cast<long>(DEStep));
         lastDEStep = DEStep;
     }
-    //LOGF_INFO(" dec encoder  = %u", steps);
     return DEStep;
 }
 
@@ -168,6 +190,7 @@ uint32_t Skywatcher::GetRAEncoderZero()
 uint32_t Skywatcher::GetRAEncoderTotal()
 {
     LOGF_DEBUG("%s() = %ld", __FUNCTION__, static_cast<long>(RASteps360));
+    LOGF_INFO("RASteps360=%ld ", static_cast<long>(RASteps360));
     return RASteps360;
 }
 
@@ -186,6 +209,7 @@ uint32_t Skywatcher::GetDEEncoderZero()
 uint32_t Skywatcher::GetDEEncoderTotal()
 {
     LOGF_DEBUG("%s() = %ld", __FUNCTION__, static_cast<long>(DESteps360));
+    LOGF_INFO("DESteps360=%ld ", static_cast<long>(DESteps360));
     return DESteps360;
 }
 
@@ -342,20 +366,21 @@ void Skywatcher::Init()
         //read_eqmod();
         RAStepHome = RAStepInit;
         DEStepHome = DEStepInit + (DESteps360 / 4);
+        LOGF_INFO("Setting Home steps DESteps360=%ld RAInit=%ld DEInit = %ld RAHome=%ld DEHome = %ld",
+                   static_cast<long>(DESteps360),RAStepInit,DEStepInit,
+                   static_cast<long>(RAStepHome), static_cast<long>(DEStepHome));
     }
     else
     {
         // Mount already initialized by another driver / driver instance
         // use default configuration && leave unchanged encoder values
         wasinitialized = true;
-        // 对于15位绝对编码器，使用中心位置作为默认值
-        // 15位编码器范围：0-32767 (0x7FFF)，中心位置：16384 (0x4000)
-        RAStepInit     = ENCODER_15BIT_CENTER;  // 15位编码器中心位置
-        DEStepInit     = ENCODER_15BIT_CENTER;  // 15位编码器中心位置
+        RAStepInit     = 0x800000;
+        DEStepInit     = 0x800000;
         RAStepHome     = RAStepInit;
         DEStepHome     = DEStepInit + (DESteps360 / 4);
         LOGF_WARN("%s() : Motors already initialized", __FUNCTION__);
-        LOGF_WARN("%s() : Setting default Init steps for 15-bit absolute encoder --  RAInit=%ld DEInit = %ld", __FUNCTION__,
+        LOGF_WARN("%s() : Setting default Init steps --  RAInit=%ld DEInit = %ld", __FUNCTION__,
                   static_cast<long>(RAStepInit), static_cast<long>(DEStepInit));
     }
     LOGF_DEBUG("%s() : Setting Home steps RAHome=%ld DEHome = %ld", __FUNCTION__,
@@ -729,11 +754,11 @@ void Skywatcher::InquireDEEncoderInfo(INDI::PropertyNumber encoderNP)
 
 void Skywatcher::InquireEncoderInfo(SkywatcherAxis axis, double *steppersvalues)
 {
-    
+
     uint32_t * Steps360       = nullptr;
     uint32_t * StepsWorm      = nullptr;
     uint32_t * HighspeedRatio = nullptr;
-    
+
     if (axis == Axis1)
     {
       Steps360 = &RASteps360;
@@ -750,14 +775,7 @@ void Skywatcher::InquireEncoderInfo(SkywatcherAxis axis, double *steppersvalues)
     // Steps per 360 degrees
     dispatch_command(InquireGridPerRevolution, axis, nullptr);
     //read_eqmod();
-    uint32_t hardwareSteps360 = Revu24str2long(response + 1);
-
-    // 对于15位绝对编码器，强制设置为32768步/360度
-    // 这确保了坐标计算的正确性
-    *Steps360 = ENCODER_15BIT_STEPS_360;  // 2^15 = 32768 (15位绝对编码器的总步数)
-
-    LOGF_WARN("%s: Using 15-bit absolute encoder - overriding hardware reported Steps360 (%u) with %u",
-              __FUNCTION__, hardwareSteps360, *Steps360);
+    *Steps360        = Revu24str2long(response + 1);
 
     // Steps per Worm
     dispatch_command(InquireTimerInterruptFreq, axis, nullptr);
@@ -822,8 +840,19 @@ bool Skywatcher::IsDERunning()
 
 void Skywatcher::ReadMotorStatus(SkywatcherAxis axis)
 {
-    dispatch_command(GetAxisStatus, axis, nullptr);
-    //read_eqmod();
+    try
+    {
+        dispatch_command(GetAxisStatus, axis, nullptr);
+    }
+    catch (EQModError &e)
+    {
+        // Keep previous status on transient communication failures.
+        DEBUGF(telescope->DBG_SCOPE_STATUS, "%s() read failed for axis %c, keeping cached status (%s)",
+               __FUNCTION__, AxisCmd[axis], e.message);
+        gettimeofday(&lastreadmotorstatus[axis], nullptr);
+        return;
+    }
+
     switch (axis)
     {
         case Axis1:
@@ -1019,146 +1048,135 @@ void Skywatcher::SlewDE(double rate)
 
 void Skywatcher::SlewTo(int32_t deltaraencoder, int32_t deltadeencoder)
 {
-    SkywatcherAxisStatus newstatus;
-    bool useHighSpeed        = false;
-    uint32_t lowperiod = 10000, lowspeedmargin = 1200, breaks = 400;
-    /* highperiod = RA 450X DE (+5) 200x, low period 32x */
-    LOGF_INFO("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
-    LOGF_INFO("%s() : Current RAStep = %u DEStep = %u", __FUNCTION__, RAStep, DEStep);
+    // SkywatcherAxisStatus newstatus;
+    // bool useHighSpeed        = false;
+    // uint32_t lowperiod = 18, lowspeedmargin = 20000, breaks = 400;
+    // /* highperiod = RA 450X DE (+5) 200x, low period 32x */
 
-    // 修改为支持15位绝对编码器：计算绝对目标位置而不是使用增量
-    uint32_t raTarget = RAStep;
-    uint32_t deTarget = DEStep;
-    bool raForward = true;
-    bool deForward = true;
+    // LOGF_DEBUG("%s() : deltaRA = %d deltaDE = %d", __FUNCTION__, deltaraencoder, deltadeencoder);
 
-    LOGF_INFO("%s() : Before RA calculation - raTarget=%u, deltaraencoder=%d", __FUNCTION__, raTarget, deltaraencoder);
+    // newstatus.slewmode = GOTO;
+    // if (deltaraencoder >= 0)
+    //     newstatus.direction = FORWARD;
+    // else
+    //     newstatus.direction = BACKWARD;
+    // if (deltaraencoder < 0)
+    //     deltaraencoder = -deltaraencoder;
+    // if (deltaraencoder > static_cast<int32_t>(lowspeedmargin))
+    //     useHighSpeed = true;
+    // else
+    //     useHighSpeed = false;
+    // if (useHighSpeed)
+    //     newstatus.speedmode = HIGHSPEED;
+    // else
+    //     newstatus.speedmode = LOWSPEED;
+    // if (deltaraencoder > 0)
+    // {
+    //     SetMotion(Axis1, newstatus);
+    //     if (useHighSpeed)
+    //         SetSpeed(Axis1, minperiods[Axis1]);
+    //     else
+    //         SetSpeed(Axis1, lowperiod);
+    //     SetTarget(Axis1, deltaraencoder);
+    //     if (useHighSpeed)
+    //         breaks = ((deltaraencoder > 3200) ? 3200 : deltaraencoder / 10);
+    //     else
+    //         breaks = ((deltaraencoder > 200) ? 200 : deltaraencoder / 10);
+    //     SetTargetBreaks(Axis1, breaks);
+    //     StartMotor(Axis1);
+    // }
 
-    if (deltaraencoder >= 0) {
-        uint32_t oldTarget = raTarget;
-        raTarget += deltaraencoder;
-        LOGF_INFO("%s() : RA positive delta - oldTarget=%u + delta=%d = newTarget=%u", __FUNCTION__, oldTarget, deltaraencoder, raTarget);
-
-        // 处理15位绝对编码器的环绕 (0-32767)
-        if(raTarget > 32767) {
-            uint32_t beforeWrap = raTarget;
-            raTarget = raTarget - 32768;
-            LOGF_INFO("%s() : RA wrap-around - %u -> %u", __FUNCTION__, beforeWrap, raTarget);
-        }
-        raForward = true;
-        newstatus.direction = FORWARD;
-    } else {
-        // 处理负数增量
-        uint32_t absDecrement = static_cast<uint32_t>(-deltaraencoder);
-        uint32_t oldTarget = raTarget;
-        LOGF_INFO("%s() : RA negative delta - oldTarget=%u - absDelta=%u", __FUNCTION__, oldTarget, absDecrement);
-
-        if (raTarget >= absDecrement) {
-            raTarget -= absDecrement;
-        } else {
-            // 处理下溢：从32767开始倒数
-            raTarget = 32768 - (absDecrement - raTarget);
-            LOGF_INFO("%s() : RA underflow wrap - result=%u", __FUNCTION__, raTarget);
-        }
-        raForward = false;
-        newstatus.direction = BACKWARD;
-    }
-
-    LOGF_INFO("%s() : Final RA target = %u", __FUNCTION__, raTarget);
-
-    int32_t absDeltaRA = (deltaraencoder < 0) ? -deltaraencoder : deltaraencoder;
-
-    if (absDeltaRA > static_cast<int32_t>(lowspeedmargin))
-        useHighSpeed = true;
-    else
-        useHighSpeed = false;
-
-    if (useHighSpeed)
-        newstatus.speedmode = HIGHSPEED;
-    else
-        newstatus.speedmode = LOWSPEED;
-
-    newstatus.slewmode = GOTO;
-
-    if (absDeltaRA > 0)
-    {
-        SetMotion(Axis1, newstatus);
-        if (useHighSpeed)
-            SetSpeed(Axis1, minperiods[Axis1]);
-        else
-            SetSpeed(Axis1, lowperiod);
-
-        // 使用绝对目标位置而不是增量
-        LOGF_INFO("%s() : Setting RA target to %u (15-bit range: 0-32767)", __FUNCTION__, raTarget);
-        SetAbsTarget(Axis1, raTarget);
-
-        if (useHighSpeed)
-            breaks = ((absDeltaRA > 320) ? 320 : absDeltaRA / 10);
-        else
-            breaks = ((absDeltaRA > 20) ? 20 : absDeltaRA / 10);
-
-        // 计算绝对断点位置
-        breaks = (raForward ? (raTarget - breaks) : (raTarget + breaks));
-        SetAbsTargetBreaks(Axis1, breaks);
-        StartMotor(Axis1);
-    }
-
-    if (deltadeencoder >= 0) {
-        deTarget += deltadeencoder;
-        // 处理15位绝对编码器的环绕 (0-32767)
-        if(deTarget > 32767) {
-            deTarget = deTarget - 32768;
-        }
-        deForward = true;
-        newstatus.direction = FORWARD;
-    } else {
-        // 处理负数增量
-        uint32_t absDecrement = static_cast<uint32_t>(-deltadeencoder);
-        if (deTarget >= absDecrement) {
-            deTarget -= absDecrement;
-        } else {
-            // 处理下溢：从32767开始倒数
-            deTarget = 32768 - (absDecrement - deTarget);
-        }
-        deForward = false;
-        newstatus.direction = BACKWARD;
-    }
-
-    int32_t absDeltaDE = (deltadeencoder < 0) ? -deltadeencoder : deltadeencoder;
-
-    if (absDeltaDE > static_cast<int32_t>(lowspeedmargin))
-        useHighSpeed = true;
-    else
-        useHighSpeed = false;
-
-    if (useHighSpeed)
-        newstatus.speedmode = HIGHSPEED;
-    else
-        newstatus.speedmode = LOWSPEED;
-
-    if (absDeltaDE > 0)
-    {
-        SetMotion(Axis2, newstatus);
-        if (useHighSpeed)
-            SetSpeed(Axis2, minperiods[Axis2]);
-        else
-            SetSpeed(Axis2, lowperiod);
-
-        // 使用绝对目标位置而不是增量
-        LOGF_INFO("%s() : Setting DE target to %u (15-bit range: 0-32767)", __FUNCTION__, deTarget);
-        SetAbsTarget(Axis2, deTarget);
-
-        if (useHighSpeed)
-            breaks = ((absDeltaDE > 1500) ? 1500 : absDeltaDE / 10);
-        else
-            breaks = ((absDeltaDE > 100) ? 100 : absDeltaDE / 10);
-
-        // 计算绝对断点位置
-        breaks = (deForward ? (deTarget - breaks) : (deTarget + breaks));
-        SetAbsTargetBreaks(Axis2, breaks);
-        StartMotor(Axis2);
-    }
+    // if (deltadeencoder >= 0)
+    //     newstatus.direction = FORWARD;
+    // else
+    //     newstatus.direction = BACKWARD;
+    // if (deltadeencoder < 0)
+    //     deltadeencoder = -deltadeencoder;
+    // if (deltadeencoder > static_cast<int32_t>(lowspeedmargin))
+    //     useHighSpeed = true;
+    // else
+    //     useHighSpeed = false;
+    // if (useHighSpeed)
+    //     newstatus.speedmode = HIGHSPEED;
+    // else
+    //     newstatus.speedmode = LOWSPEED;
+    // if (deltadeencoder > 0)
+    // {
+    //     SetMotion(Axis2, newstatus);
+    //     if (useHighSpeed)
+    //         SetSpeed(Axis2, minperiods[Axis2]);
+    //     else
+    //         SetSpeed(Axis2, lowperiod);
+    //     SetTarget(Axis2, deltadeencoder);
+    //     if (useHighSpeed)
+    //         breaks = ((deltadeencoder > 3200) ? 3200 : deltadeencoder / 10);
+    //     else
+    //         breaks = ((deltadeencoder > 200) ? 200 : deltadeencoder / 10);
+    //     SetTargetBreaks(Axis2, breaks);
+    //     StartMotor(Axis2);
+    // }
 }
+
+void Skywatcher::SlewTotarget(float target_ra, float target_de, float current_ra, float current_de)
+{
+    // Calculate the difference between target and current position
+    float deltara = target_ra - current_ra;
+    float deltade = target_de - current_de;
+
+    LOGF_INFO("SlewTotarget called: Target RA=%.6f DE=%.6f, Current RA=%.6f DE=%.6f",
+              target_ra, target_de, current_ra, current_de);
+    LOGF_INFO("Delta: RA=%.6f DE=%.6f", deltara, deltade);
+
+    SkywatcherAxisStatus newstatus;
+    newstatus.slewmode = GOTO;
+    newstatus.speedmode = HIGHSPEED;
+    newstatus.direction = FORWARD;
+    SetMotion(Axis2, newstatus);
+
+    // Send target and current position to QHY mount in two separate commands
+    try
+    {
+        // First command: Send target RA and DEC (:X1)
+        char target_arg[32];
+        snprintf(target_arg, sizeof(target_arg), "%.6f,%.6f", target_ra, target_de);
+
+        LOGF_INFO("Sending target position to mount: %s", target_arg);
+        dispatch_command(SetTargetAndCurrentPos, Axis1, target_arg);
+
+        // Second command: Send current RA and DEC (:X2)
+        // This helps firmware avoid first-goto ambiguity when initial encoder read times out.
+        char current_arg[32];
+        snprintf(current_arg, sizeof(current_arg), "%.6f,%.6f", current_ra, current_de);
+
+        LOGF_INFO("Sending current position to mount: %s", current_arg);
+        dispatch_command(SetTargetAndCurrentPos, Axis2, current_arg);
+
+        LOG_INFO("QHY Mount target and current position sent successfully");
+    }
+    catch (EQModError &e)
+    {
+        LOGF_ERROR("Failed to send target and current position: %s", e.message);
+        throw;
+    }
+
+    // Continue with the actual slew operation if needed
+    if (deltara != 0.0f || deltade != 0.0f)
+    {
+        // Here you can add the actual slew implementation
+        // For now, just log that a slew would be performed
+        LOGF_INFO("Slew operation would be performed: Delta RA=%.6f, Delta DE=%.6f", deltara, deltade);
+    }
+    // SkywatcherAxisStatus newstatus;
+    // newstatus.slewmode = GOTO;
+    // SetMotion(Axis2, newstatus);
+    // SetMotion(Axis1, newstatus);
+    // SkywatcherAxisStatus newstatus1;
+    // newstatus1.slewmode = GOTO;
+    // newstatus1.speedmode = HIGHSPEED;
+    // newstatus1.direction = FORWARD;
+    // SetMotion(Axis1, newstatus1);
+}
+
 
 void Skywatcher::AbsSlewTo(uint32_t raencoder, uint32_t deencoder, bool raup, bool deup)
 {
@@ -1287,7 +1305,10 @@ void Skywatcher::SetRARate(double rate)
     }
     newstatus.direction = ((rate >= 0.0) ? FORWARD : BACKWARD);
     //newstatus.slewmode=RAStatus.slewmode;
-    newstatus.slewmode = SLEW;
+    if (MountCode == QHY_MOUNT_CODE)
+        newstatus.slewmode = TRACK;
+    else
+        newstatus.slewmode = SLEW;
     if (useHighspeed)
         newstatus.speedmode = HIGHSPEED;
     else
@@ -1351,7 +1372,10 @@ void Skywatcher::SetDERate(double rate)
     }
     newstatus.direction = ((rate >= 0.0) ? FORWARD : BACKWARD);
     //newstatus.slewmode=DEStatus.slewmode;
-    newstatus.slewmode = SLEW;
+    if (MountCode == QHY_MOUNT_CODE)
+        newstatus.slewmode = TRACK;
+    else
+        newstatus.slewmode = SLEW;
     if (useHighspeed)
         newstatus.speedmode = HIGHSPEED;
     else
@@ -1439,7 +1463,7 @@ void Skywatcher::SetSpeed(SkywatcherAxis axis, uint32_t period)
         double calculated_period = period_khz * 100000;
         //LOGF_INFO(" calculated_period (raw) = %g", calculated_period);
 
-        period = static_cast<uint32_t>(calculated_period); 
+        period = static_cast<uint32_t>(calculated_period);
 
         DEBUGF(telescope->DBG_MOUNT, "QHY Mount: Setting frequency to %.2f kHz (firmware value=%ld)", period_khz, static_cast<long>(period));
     }
@@ -1499,16 +1523,7 @@ void Skywatcher::SetTargetBreaks(SkywatcherAxis axis, uint32_t increment)
 void Skywatcher::SetAbsTarget(SkywatcherAxis axis, uint32_t target)
 {
     char cmd[7];
-
-    // 强制确保目标值在15位绝对编码器范围内 (0-32767)
-    if (target > 32767) {
-        uint32_t originalTarget = target;
-        target = target % 32768;  // 使用模运算确保在范围内
-        LOGF_WARN("SetAbsTarget: Target %u exceeds 15-bit range, wrapping to %u", originalTarget, target);
-    }
-
     DEBUGF(telescope->DBG_MOUNT, "%s() : Axis = %c -- target=%ld", __FUNCTION__, AxisCmd[axis], static_cast<long>(target));
-    LOGF_INFO(" Abs-target is  = %u (15-bit safe)", target);
     long2Revu24str(target, cmd);
     //IDLog("Setting target for axis %c  to %d\n", AxisCmd[axis], increment);
     dispatch_command(SetGotoTarget, axis, cmd);
@@ -1830,6 +1845,12 @@ void Skywatcher::StartMotor(SkywatcherAxis axis)
                     else
                         motioncmd[0] = '0';
                     break;
+                case TRACK:
+                    if (NewStatus[axis].speedmode == LOWSPEED)
+                        motioncmd[0] = '4';
+                    else
+                        motioncmd[0] = '5';
+                    break;
                 default:
                     motioncmd[0] = '1';
                     break;
@@ -1869,7 +1890,7 @@ void Skywatcher::SetMotion(SkywatcherAxis axis, SkywatcherAxisStatus newstatus)
 
     DEBUGF(telescope->DBG_MOUNT, "%s() : Axis = %c -- dir=%s mode=%s speedmode=%s", __FUNCTION__, AxisCmd[axis],
            ((newstatus.direction == FORWARD) ? "forward" : "backward"),
-           ((newstatus.slewmode == SLEW) ? "slew" : "goto"),
+           ((newstatus.slewmode == SLEW) ? "slew" : (newstatus.slewmode == GOTO ? "goto" : "track")),
            ((newstatus.speedmode == LOWSPEED) ? "lowspeed" : "highspeed"));
 
     CheckMotorStatus(axis);
@@ -1891,6 +1912,12 @@ void Skywatcher::SetMotion(SkywatcherAxis axis, SkywatcherAxisStatus newstatus)
                 motioncmd[0] = '2';
             else
                 motioncmd[0] = '0';
+            break;
+        case TRACK:
+            if (newstatus.speedmode == LOWSPEED)
+                motioncmd[0] = '4';
+            else
+                motioncmd[0] = '5';
             break;
         default:
             motioncmd[0] = '1';
@@ -2026,7 +2053,12 @@ double Skywatcher::get_max_rate()
 
 bool Skywatcher::dispatch_command(SkywatcherCommand cmd, SkywatcherAxis axis, char *command_arg)
 {
-    for (uint8_t i = 0; i < EQMOD_MAX_RETRY; i++)
+    const bool isPollingCmd = (cmd == GetAxisPosition || cmd == GetAxisStatus);
+    const uint8_t maxRetry  = isPollingCmd ? 2 : EQMOD_MAX_RETRY;
+    const uint32_t prevReadTimeout = read_timeout_us;
+    read_timeout_us = isPollingCmd ? 50000 : EQMOD_TIMEOUT;
+
+    for (uint8_t i = 0; i < maxRetry; i++)
     {
         // Clear string
         command[0] = '\0';
@@ -2045,10 +2077,11 @@ bool Skywatcher::dispatch_command(SkywatcherCommand cmd, SkywatcherAxis axis, ch
 
             if ((err_code = tty_write_string(PortFD, command, &nbytes_written)) != TTY_OK)
             {
-                if (i == EQMOD_MAX_RETRY - 1)
+                if (i == maxRetry - 1)
                 {
                     char ttyerrormsg[ERROR_MSG_LENGTH];
                     tty_error_msg(err_code, ttyerrormsg, ERROR_MSG_LENGTH);
+                    read_timeout_us = prevReadTimeout;
                     throw EQModError(EQModError::ErrDisconnect, "tty write failed, check connection: %s", ttyerrormsg);
                 }
                 else
@@ -2080,6 +2113,7 @@ bool Skywatcher::dispatch_command(SkywatcherCommand cmd, SkywatcherAxis axis, ch
                     LOGF_WARN("%s() : serial port read failed for %dms (%d retries), verify mount link.", __FUNCTION__,
                               (i * EQMOD_TIMEOUT) / 1000, i);
                 }
+                read_timeout_us = prevReadTimeout;
                 return true;
             }
         }
@@ -2088,13 +2122,17 @@ bool Skywatcher::dispatch_command(SkywatcherCommand cmd, SkywatcherAxis axis, ch
             DEBUGF(telescope->DBG_COMM, "read_eqmod() failed: %s (attempt %i)", ex.message, i);
             // By this time, we just rethrow the error
             // JM 2018-05-07 immediately rethrow if GET_FEATURES_CMD
-            if (i == EQMOD_MAX_RETRY - 1 || cmd == GetFeatureCmd)
+            if (i == maxRetry - 1 || cmd == GetFeatureCmd)
+            {
+                read_timeout_us = prevReadTimeout;
                 throw;
+            }
         }
 
         DEBUG(telescope->DBG_COMM, "read error, will retry again...");
     }
 
+    read_timeout_us = prevReadTimeout;
     return true;
 }
 
@@ -2106,14 +2144,13 @@ bool Skywatcher::read_eqmod()
     response[0] = '\0';
     if (!isSimulation())
     {
-        //Have to onsider cases when we read ! (error) or 0x01 (buffer overflow)
-        // Read until encountring a CR
-        if ((err_code = tty_read_section_expanded(PortFD, response, 0x0D, 0, EQMOD_TIMEOUT, &nbytes_read)) != TTY_OK)
+        // Have to consider cases when we read ! (error) or 0x01 (buffer overflow)
+        // Read until encountering a CR
+        if ((err_code = tty_read_section_expanded(PortFD, response, 0x0D, 0, read_timeout_us, &nbytes_read)) != TTY_OK)
         {
             char ttyerrormsg[ERROR_MSG_LENGTH];
             tty_error_msg(err_code, ttyerrormsg, ERROR_MSG_LENGTH);
             throw EQModError(EQModError::ErrDisconnect, "tty read failed, check connection: %s", ttyerrormsg);
-            //return false;
         }
     }
     else
@@ -2128,19 +2165,60 @@ bool Skywatcher::read_eqmod()
         DEBUGF(telescope->DBG_COMM, "read_eqmod: \"%s\", %d bytes read", response, nbytes_read);
         debugnextread = false;
     }
+
     switch (response[0])
     {
         case '=':
-	    //check if response is valid
-	    for (const char *p = &response[1]; *p != '\0'; ++p)
-	    {
-		//only allow uppercase hex chars
-		if (!(isxdigit(*p) && !islower(*p)))
-		{
-            		throw EQModError(EQModError::ErrInvalidCmd, "Invalid response to command %s - Reply %s (response contains non-hex character)", command, response);
-		}
-	    }
+            // Enhanced validation for both hex and double formats
+            for (const char *p = &response[1]; *p != '\0'; ++p)
+            {
+                // Allow: uppercase hex digits, decimal point, and minus sign
+                bool valid_char = (isxdigit(*p) && !islower(*p)) ||
+                                 *p == '.' ||
+                                 *p == '-';
+
+                if (!valid_char)
+                {
+                    throw EQModError(EQModError::ErrInvalidCmd,
+                        "Invalid response to command %s - Reply %s (response contains invalid character: %c)",
+                        command, response, *p);
+                }
+            }
+
+            // Additional validation for double format
+            if (strchr(response + 1, '.') != nullptr)
+            {
+                // Validate double format: only one decimal point, minus sign only at start
+                const char* data_start = response + 1;
+                int decimal_count = 0;
+                int minus_count = 0;
+
+                for (const char *p = data_start; *p != '\0'; ++p)
+                {
+                    if (*p == '.') decimal_count++;
+                    if (*p == '-') minus_count++;
+                }
+
+                if (decimal_count > 1)
+                {
+                    throw EQModError(EQModError::ErrInvalidCmd,
+                        "Invalid response to command %s - Reply %s (multiple decimal points)",
+                        command, response);
+                }
+
+                // Check if minus sign is only at the beginning (if present)
+                if (minus_count > 0)
+                {
+                    if (minus_count > 1 || data_start[0] != '-')
+                    {
+                        throw EQModError(EQModError::ErrInvalidCmd,
+                            "Invalid response to command %s - Reply %s (invalid minus sign position)",
+                            command, response);
+                    }
+                }
+            }
             break;
+
         case '!':
             throw EQModError(EQModError::ErrCmdFailed, "Failed command %s - Reply %s", command, response);
         default:
@@ -2208,4 +2286,149 @@ void Skywatcher::SetBacklashDE(uint32_t backlash)
 void Skywatcher::SetBacklashUseDE(bool usebacklash)
 {
     UseBacklash[Axis2] = usebacklash;
+}
+
+// QHY Mount location synchronization
+void Skywatcher::SyncLocationCoordinates()
+{
+    // Get location from EQMod telescope instance
+    double latitude = telescope->getLatitude();
+    double longitude = telescope->getLongitude();
+    double elevation = 0.0; // EQMod doesn't have getElevation method, use 0 as default
+
+    SyncLocationCoordinates(latitude, longitude, elevation);
+}
+
+// QHY Mount location synchronization with specific coordinates
+void Skywatcher::SyncLocationCoordinates(double latitude, double longitude, double elevation)
+{
+    // Format coordinates for the mount
+    // Latitude: -90.0 to +90.0 degrees (South negative, North positive)
+    // Longitude: 0.0 to 360.0 degrees (INDI standard: 0-360 East)
+    // Elevation: meters above sea level
+
+    // Convert longitude from INDI format (0-360) to standard format (-180 to +180)
+    double std_longitude = longitude > 180.0 ? longitude - 360.0 : longitude;
+
+    // Format as: LAT+DD.DDDD,LON+DDD.DDDD,ELE+DDD (no ending dot, only \r from dispatch_command)
+    // Use 4 decimal places for coordinates (about 10 meter precision)
+    char command_arg[64];
+    snprintf(command_arg, sizeof(command_arg), "%+08.4f,%+09.4f,%+04.0f",
+             latitude, std_longitude, elevation);
+
+    try
+    {
+        LOGF_INFO("Syncing location to mount: Lat %.6f°, Lon %.6f°, Elev %.0fm",
+                  latitude, std_longitude, elevation);
+
+        // Send location sync command
+        dispatch_command(SetLocationCoordinates, Axis1, command_arg);
+
+        LOG_INFO("QHY Mount location coordinates synchronized successfully");
+    }
+    catch (EQModError &e)
+    {
+        LOGF_ERROR("Failed to sync location coordinates: %s", e.message);
+        throw;
+    }
+}
+
+// QHY Mount time synchronization
+void Skywatcher::SyncTimeAndTimezone()
+{
+    // Always use system time to ensure accuracy
+    // This ignores KStars time which might be incorrect
+    SyncTimeAndTimezoneFromSystem();
+}
+
+// QHY Mount time synchronization with specific time
+void Skywatcher::SyncTimeAndTimezone(const struct tm* utc_time, double utc_offset_hours)
+{
+    // Always use current system time instead of INDI time to ensure accuracy
+    // This ignores the passed UTC time and gets fresh system time
+    time_t current_time;
+    time(&current_time);
+    struct tm* local_time = localtime(&current_time);
+
+    // Format local time as YYYYMMDDHHMMSS for the mount
+    char time_str[32];
+    snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d",
+             local_time->tm_year + 1900,
+             local_time->tm_mon + 1,
+             local_time->tm_mday,
+             local_time->tm_hour,
+             local_time->tm_min,
+             local_time->tm_sec);
+
+    // Get system timezone offset instead of INDI offset
+    int timezone_offset_seconds = local_time->tm_gmtoff;
+    int timezone_offset_hours = timezone_offset_seconds / 3600;
+
+    // Create command string with local time and timezone
+    // Format: YYYYMMDDHHMMSS+HH or YYYYMMDDHHMMSS-HH
+    char command_arg[64];
+    snprintf(command_arg, sizeof(command_arg), "%s%+03d", time_str, timezone_offset_hours);
+
+    try
+    {
+        LOGF_INFO("Syncing time and timezone to mount: Local time %s, timezone offset %+d hours (mount will calculate UTC)",
+                  time_str, timezone_offset_hours);
+
+        // Send time sync command to both axes (though the command is global)
+        dispatch_command(SetTimeAndTimezone, Axis1, command_arg);
+
+        LOG_INFO("Local time and timezone synchronized successfully");
+    }
+    catch (EQModError &e)
+    {
+        LOGF_ERROR("Failed to sync local time and timezone: %s", e.message);
+        throw;
+    }
+}
+
+// Fallback method using system time
+void Skywatcher::SyncTimeAndTimezoneFromSystem()
+{
+    // Get current system time
+    time_t rawtime;
+    struct tm *timeinfo;
+    char time_str[32];
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);  // Get local time instead of UTC
+
+    // Format local time as YYYYMMDDHHMMSS for the mount
+    snprintf(time_str, sizeof(time_str), "%04d%02d%02d%02d%02d%02d",
+             timeinfo->tm_year + 1900,
+             timeinfo->tm_mon + 1,
+             timeinfo->tm_mday,
+             timeinfo->tm_hour,
+             timeinfo->tm_min,
+             timeinfo->tm_sec);
+
+    // Get timezone offset in hours (use the same timeinfo)
+    struct tm *local_timeinfo = timeinfo;
+    int timezone_offset_seconds = local_timeinfo->tm_gmtoff;
+    int timezone_offset_hours = timezone_offset_seconds / 3600;
+
+    // Create command string with time and timezone
+    // Format: YYYYMMDDHHMMSS+HH or YYYYMMDDHHMMSS-HH
+    char command_arg[64];
+    snprintf(command_arg, sizeof(command_arg), "%s%+03d", time_str, timezone_offset_hours);
+
+    try
+    {
+        LOGF_INFO("Syncing time and timezone to mount: Local time %s, timezone offset %+d hours (mount will calculate UTC)",
+                  time_str, timezone_offset_hours);
+
+        // Send time sync command to both axes (though the command is global)
+        dispatch_command(SetTimeAndTimezone, Axis1, command_arg);
+
+        LOG_INFO("QHY Mount time and timezone synchronized successfully using system time");
+    }
+    catch (EQModError &e)
+    {
+        LOGF_ERROR("Failed to sync time and timezone: %s", e.message);
+        throw;
+    }
 }

@@ -27,4 +27,7 @@ class QHYMountBase : public EQMod
     protected:
         virtual const char *getDefaultName() override;
         virtual bool initProperties() override;
+        virtual bool updateProperties() override;
+        virtual bool updateTime(ln_date *utc, double utc_offset) override;
+        virtual bool updateLocation(double latitude, double longitude, double elevation) override;
 };
